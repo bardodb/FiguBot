@@ -217,7 +217,7 @@ async function startBot() {
                 try {
                     await sock.sendMessage(
                         senderJid,
-                        { text: ' Erro ao criar figurinha. Detalhes do erro: ' + error.message }
+                        { text: '❌ Erro ao criar figurinha. Detalhes do erro: ' + error.message }
                     );
                 } catch (sendError) {
                     console.error('Erro ao enviar mensagem de erro:', sendError);
@@ -233,7 +233,7 @@ async function startBot() {
                 // Responde ao usuário informando quantas imagens foram recebidas
                 await sock.sendMessage(
                     senderJid,
-                    { text: ` Criando ${messages.length} figurinha(s)...` }
+                    { text: `⏳ Criando ${messages.length} figurinha(s)...` }
                 );
                 
                 // Processa cada imagem em paralelo
@@ -294,22 +294,24 @@ async function startBot() {
                 if (failCount > 0) {
                     await sock.sendMessage(
                         senderJid,
-                        { text: ` ${successCount} figurinha(s) criada(s) com sucesso.\n ${failCount} falha(s).` }
+                        { text: `✅ ${successCount} figurinha(s) criada(s) com sucesso.\n❌ ${failCount} falha(s).` }
                     );
                 } else if (successCount > 1) {
                     await sock.sendMessage(
                         senderJid,
-                        { text: `Todas as ${successCount} figurinhas foram criadas com sucesso!` }
+                        { text: `✅ Todas as ${successCount} figurinhas foram criadas com sucesso!` }
                     );
                 }
                 
                 console.log(`Processamento de ${messages.length} imagens concluído. Sucesso: ${successCount}, Falhas: ${failCount}`);
             } catch (error) {
-                console.error('Erro ao processar imagens em lote:', error);
+                console.error('Erro ao processar imagens:', error);
+                
+                // Tentar enviar mensagem de erro
                 try {
                     await sock.sendMessage(
                         senderJid,
-                        { text: ' Erro ao processar imagens. Detalhes: ' + error.message }
+                        { text: '❌ Erro ao processar imagens. Detalhes: ' + error.message }
                     );
                 } catch (sendError) {
                     console.error('Erro ao enviar mensagem de erro:', sendError);
@@ -422,7 +424,7 @@ async function startBot() {
                         console.log('Comando ping recebido');
                         await sock.sendMessage(
                             senderJid,
-                            { text: ' Pong! Bot online e funcionando.' }
+                            { text: '🟢 Pong! Bot online e funcionando.' }
                         );
                         continue;
                     }
@@ -432,11 +434,11 @@ async function startBot() {
                         console.log('Comando de ajuda recebido');
                         await sock.sendMessage(
                             senderJid,
-                            { text: ' *Bot de Figurinhas*\n\n' +
+                            { text: '🤖 *Bot de Figurinhas*\n\n' +
                                    '- Envie uma imagem para convertê-la em figurinha\n' +
                                    '- Envie várias imagens e todas serão convertidas\n' +
                                    '- Digite *ping* para verificar se estou online\n' +
-                                   '- Digite *ajuda* ou *help* para ver esta mensagem' }
+                                   '- Digite *ajuda* para ver esta mensagem' }
                         );
                         continue;
                     }
@@ -445,7 +447,7 @@ async function startBot() {
                     console.log('Mensagem de texto genérica recebida, enviando dica');
                     await sock.sendMessage(
                         senderJid,
-                        { text: ' Olá! Envie uma imagem para que eu a converta em figurinha.\n' +
+                        { text: '👋 Olá! Envie uma imagem para que eu a converta em figurinha.\n' +
                                'Digite *ajuda* para ver os comandos disponíveis.' }
                     );
                     continue;

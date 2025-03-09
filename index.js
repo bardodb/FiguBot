@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 const qrcode = require('qrcode-terminal');
+// Importando o módulo crypto explicitamente
+const crypto = require('crypto');
 
 // Configuração de logs
 const logger = pino({ 

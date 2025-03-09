@@ -7,6 +7,10 @@ const sharp = require('sharp');
 const qrcode = require('qrcode-terminal');
 // Importando o módulo crypto explicitamente
 const crypto = require('crypto');
+// Adicionando módulos para servidor web e geração de QR code como imagem
+const express = require('express');
+const qrcodeImg = require('qrcode');
+const http = require('http');
 
 // Configuração de logs
 const logger = pino({ 
@@ -35,6 +39,95 @@ if (!fs.existsSync(authFolder)) {
     fs.mkdirSync(authFolder, { recursive: true });
 }
 
+// Inicializar servidor Express para exibir o QR code
+const app = express();
+const PORT = process.env.PORT || 3000;
+let qrCodeValue = null;
+
+app.get('/', (req, res) => {
+    if (qrCodeValue) {
+        res.send(`
+            <html>
+                <head>
+                    <title>WhatsApp Bot QR Code</title>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <style>
+                        body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
+                        h1 { color: #075e54; }
+                        .qr-container { margin: 20px auto; max-width: 300px; }
+                        .instructions { margin: 20px; padding: 15px; background-color: #f0f0f0; border-radius: 5px; }
+                        .refresh { margin-top: 20px; }
+                    </style>
+                </head>
+                <body>
+                    <h1>Bot de Figurinhas - QR Code</h1>
+                    <div class="qr-container">
+                        <img src="/qrcode" alt="QR Code para escanear" style="width: 100%">
+                    </div>
+                    <div class="instructions">
+                        <p>Escaneie este QR code com seu WhatsApp para conectar o bot.</p>
+                        <p>1. Abra o WhatsApp no seu telefone</p>
+                        <p>2. Toque em Menu ou Configurações e selecione WhatsApp Web</p>
+                        <p>3. Aponte seu telefone para esta tela para capturar o código</p>
+                    </div>
+                    <div class="refresh">
+                        <button onclick="window.location.reload()">Atualizar QR Code</button>
+                    </div>
+                </body>
+            </html>
+        `);
+    } else {
+        res.send(`
+            <html>
+                <head>
+                    <title>WhatsApp Bot Status</title>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <style>
+                        body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
+                        h1 { color: #075e54; }
+                        .status { margin: 20px; padding: 15px; background-color: #dcf8c6; border-radius: 5px; }
+                        .refresh { margin-top: 20px; }
+                    </style>
+                </head>
+                <body>
+                    <h1>Bot de Figurinhas - Status</h1>
+                    <div class="status">
+                        <p>O bot já está conectado ou nenhum QR code está disponível no momento.</p>
+                        <p>Se você acabou de iniciar o bot, aguarde alguns segundos e atualize a página.</p>
+                    </div>
+                    <div class="refresh">
+                        <button onclick="window.location.reload()">Verificar Status</button>
+                    </div>
+                </body>
+            </html>
+        `);
+    }
+});
+
+app.get('/qrcode', async (req, res) => {
+    if (qrCodeValue) {
+        try {
+            res.setHeader('Content-Type', 'image/png');
+            const qrBuffer = await qrcodeImg.toBuffer(qrCodeValue);
+            res.send(qrBuffer);
+        } catch (error) {
+            console.error('Erro ao gerar imagem do QR code:', error);
+            res.status(500).send('Erro ao gerar QR code');
+        }
+    } else {
+        res.status(404).send('QR code não disponível');
+    }
+});
+
+// Iniciar o servidor
+const server = http.createServer(app);
+server.listen(PORT, () => {
+    console.log(`Servidor web iniciado na porta ${PORT}. Acesse para ver o QR code.`);
+    // Obter a URL do Railway se disponível
+    const railwayUrl = process.env.RAILWAY_STATIC_URL || `http://localhost:${PORT}`;
+    console.log(`URL para acessar o QR code: ${railwayUrl}`);
+});
+
 // Função para iniciar o bot
 async function startBot() {
     try {
@@ -52,7 +145,7 @@ async function startBot() {
         const sock = makeWASocket({
             version,
             auth: state,
-            printQRInTerminal: true,
+            printQRInTerminal: false,
             logger: pino({ level: 'warn' }),
             browser: ['Bot de Figurinhas', 'Chrome', '10.0'],
             connectTimeoutMs: 60000,
@@ -73,7 +166,9 @@ async function startBot() {
             
             if (qr) {
                 console.log('QR Code gerado. Escaneie com seu WhatsApp:');
-                qrcode.generate(qr, { small: true });
+                // Armazenar o valor do QR code para exibição na web
+                qrCodeValue = qr;
+                console.log('QR Code disponível na interface web. Acesse a URL do servidor para escanear.');
             }
             
             if (connection === 'close') {
@@ -101,6 +196,8 @@ async function startBot() {
                 }
             } else if (connection === 'open') {
                 console.log('Bot conectado! Pronto para receber imagens e criar figurinhas.');
+                // Limpar o QR code quando conectado
+                qrCodeValue = null;
             }
         });
         
@@ -447,8 +544,10 @@ async function startBot() {
         });
     } catch (error) {
         console.error('Erro ao iniciar o bot:', error);
-        console.log('Tentando reiniciar em 10 segundos...');
-        setTimeout(startBot, 10000);
+        setTimeout(() => {
+            console.log('Tentando reiniciar o bot após erro...');
+            startBot();
+        }, 10000);
     }
 }
 

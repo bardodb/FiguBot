@@ -44,6 +44,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 let qrCodeValue = null;
 
+// Middleware para servir arquivos estáticos
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Rota principal
 app.get('/', (req, res) => {
     if (qrCodeValue) {
         res.send(`
@@ -51,27 +55,39 @@ app.get('/', (req, res) => {
                 <head>
                     <title>WhatsApp Bot QR Code</title>
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <meta http-equiv="refresh" content="30"> 
                     <style>
-                        body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
+                        body { font-family: Arial, sans-serif; text-align: center; margin: 20px; background-color: #f0f0f0; }
                         h1 { color: #075e54; }
+                        .container { max-width: 800px; margin: 0 auto; background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
                         .qr-container { margin: 20px auto; max-width: 300px; }
-                        .instructions { margin: 20px; padding: 15px; background-color: #f0f0f0; border-radius: 5px; }
+                        .instructions { margin: 20px; padding: 15px; background-color: #dcf8c6; border-radius: 5px; text-align: left; }
                         .refresh { margin-top: 20px; }
+                        .refresh button { background-color: #075e54; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+                        .refresh button:hover { background-color: #128c7e; }
+                        .status { padding: 10px; background-color: #fff5e6; border-radius: 5px; margin-top: 20px; }
                     </style>
                 </head>
                 <body>
-                    <h1>Bot de Figurinhas - QR Code</h1>
-                    <div class="qr-container">
-                        <img src="/qrcode" alt="QR Code para escanear" style="width: 100%">
-                    </div>
-                    <div class="instructions">
-                        <p>Escaneie este QR code com seu WhatsApp para conectar o bot.</p>
-                        <p>1. Abra o WhatsApp no seu telefone</p>
-                        <p>2. Toque em Menu ou Configurações e selecione WhatsApp Web</p>
-                        <p>3. Aponte seu telefone para esta tela para capturar o código</p>
-                    </div>
-                    <div class="refresh">
-                        <button onclick="window.location.reload()">Atualizar QR Code</button>
+                    <div class="container">
+                        <h1>Bot de Figurinhas - QR Code</h1>
+                        <div class="qr-container">
+                            <img src="/qrcode" alt="QR Code para escanear" style="width: 100%; border: 1px solid #ddd; border-radius: 5px;">
+                        </div>
+                        <div class="instructions">
+                            <h3>Como conectar:</h3>
+                            <p>1. Abra o WhatsApp no seu telefone</p>
+                            <p>2. Toque em Menu (três pontos) ou Configurações e selecione <strong>Aparelhos conectados</strong></p>
+                            <p>3. Selecione <strong>Conectar um aparelho</strong></p>
+                            <p>4. Aponte seu telefone para esta tela para capturar o código QR</p>
+                        </div>
+                        <div class="status">
+                            <p>Esta página será atualizada automaticamente a cada 30 segundos.</p>
+                            <p>Após conectar, o bot estará pronto para receber imagens e criar figurinhas!</p>
+                        </div>
+                        <div class="refresh">
+                            <button onclick="window.location.reload()">Atualizar QR Code</button>
+                        </div>
                     </div>
                 </body>
             </html>
@@ -83,20 +99,26 @@ app.get('/', (req, res) => {
                     <title>WhatsApp Bot Status</title>
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
                     <style>
-                        body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
+                        body { font-family: Arial, sans-serif; text-align: center; margin: 20px; background-color: #f0f0f0; }
                         h1 { color: #075e54; }
+                        .container { max-width: 800px; margin: 0 auto; background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
                         .status { margin: 20px; padding: 15px; background-color: #dcf8c6; border-radius: 5px; }
                         .refresh { margin-top: 20px; }
+                        .refresh button { background-color: #075e54; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+                        .refresh button:hover { background-color: #128c7e; }
                     </style>
                 </head>
                 <body>
-                    <h1>Bot de Figurinhas - Status</h1>
-                    <div class="status">
-                        <p>O bot já está conectado ou nenhum QR code está disponível no momento.</p>
-                        <p>Se você acabou de iniciar o bot, aguarde alguns segundos e atualize a página.</p>
-                    </div>
-                    <div class="refresh">
-                        <button onclick="window.location.reload()">Verificar Status</button>
+                    <div class="container">
+                        <h1>Bot de Figurinhas - Status</h1>
+                        <div class="status">
+                            <h2> Bot Conectado!</h2>
+                            <p>O bot já está conectado ao WhatsApp e pronto para receber imagens e criar figurinhas.</p>
+                            <p>Se você acabou de iniciar o bot e está vendo esta mensagem, significa que as credenciais salvas anteriormente foram usadas para autenticação automática.</p>
+                        </div>
+                        <div class="refresh">
+                            <button onclick="window.location.reload()">Verificar Status</button>
+                        </div>
                     </div>
                 </body>
             </html>
@@ -122,10 +144,29 @@ app.get('/qrcode', async (req, res) => {
 // Iniciar o servidor
 const server = http.createServer(app);
 server.listen(PORT, () => {
-    console.log(`Servidor web iniciado na porta ${PORT}. Acesse para ver o QR code.`);
-    // Obter a URL do Railway se disponível
-    const railwayUrl = process.env.RAILWAY_STATIC_URL || `http://localhost:${PORT}`;
-    console.log(`URL para acessar o QR code: ${railwayUrl}`);
+    console.log(`Servidor web iniciado na porta ${PORT}.`);
+    
+    // Obter a URL do Railway
+    let appUrl;
+    if (process.env.RAILWAY_STATIC_URL) {
+        appUrl = process.env.RAILWAY_STATIC_URL;
+    } else if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+        appUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+    } else {
+        appUrl = `http://localhost:${PORT}`;
+    }
+    
+    console.log(`URL para acessar o QR code: ${appUrl}`);
+    
+    // Exibir QR code no console se estiver em ambiente local
+    if (appUrl.includes('localhost')) {
+        console.log('Ambiente local detectado. Você pode acessar o QR code em:');
+        console.log(`1. Navegador: ${appUrl}`);
+        console.log('2. Ou escanear o QR code que aparecerá no terminal quando disponível');
+    } else {
+        console.log('Ambiente Railway detectado. Acesse a URL acima para ver o QR code.');
+        console.log('IMPORTANTE: Você precisa acessar a URL fornecida pelo Railway, não o localhost!');
+    }
 });
 
 // Função para iniciar o bot
@@ -278,7 +319,7 @@ async function startBot() {
                 try {
                     await sock.sendMessage(
                         senderJid,
-                        { text: '❌ Erro ao criar figurinha. Detalhes do erro: ' + error.message }
+                        { text: ' Erro ao criar figurinha. Detalhes do erro: ' + error.message }
                     );
                 } catch (sendError) {
                     console.error('Erro ao enviar mensagem de erro:', sendError);
@@ -294,7 +335,7 @@ async function startBot() {
                 // Responde ao usuário informando quantas imagens foram recebidas
                 await sock.sendMessage(
                     senderJid,
-                    { text: `⏳ Criando ${messages.length} figurinha(s)...` }
+                    { text: ` Criando ${messages.length} figurinha(s)...` }
                 );
                 
                 // Processa cada imagem em paralelo
@@ -355,12 +396,12 @@ async function startBot() {
                 if (failCount > 0) {
                     await sock.sendMessage(
                         senderJid,
-                        { text: `✅ ${successCount} figurinha(s) criada(s) com sucesso.\n❌ ${failCount} falha(s).` }
+                        { text: ` ${successCount} figurinha(s) criada(s) com sucesso.\n ${failCount} falha(s).` }
                     );
                 } else if (successCount > 1) {
                     await sock.sendMessage(
                         senderJid,
-                        { text: `✅ Todas as ${successCount} figurinhas foram criadas com sucesso!` }
+                        { text: `Todas as ${successCount} figurinhas foram criadas com sucesso!` }
                     );
                 }
                 
@@ -370,7 +411,7 @@ async function startBot() {
                 try {
                     await sock.sendMessage(
                         senderJid,
-                        { text: '❌ Erro ao processar imagens. Detalhes: ' + error.message }
+                        { text: ' Erro ao processar imagens. Detalhes: ' + error.message }
                     );
                 } catch (sendError) {
                     console.error('Erro ao enviar mensagem de erro:', sendError);
@@ -483,7 +524,7 @@ async function startBot() {
                         console.log('Comando ping recebido');
                         await sock.sendMessage(
                             senderJid,
-                            { text: '🟢 Pong! Bot online e funcionando.' }
+                            { text: ' Pong! Bot online e funcionando.' }
                         );
                         continue;
                     }
@@ -493,7 +534,7 @@ async function startBot() {
                         console.log('Comando de ajuda recebido');
                         await sock.sendMessage(
                             senderJid,
-                            { text: '🤖 *Bot de Figurinhas*\n\n' +
+                            { text: ' *Bot de Figurinhas*\n\n' +
                                    '- Envie uma imagem para convertê-la em figurinha\n' +
                                    '- Envie várias imagens e todas serão convertidas\n' +
                                    '- Digite *ping* para verificar se estou online\n' +
@@ -506,7 +547,7 @@ async function startBot() {
                     console.log('Mensagem de texto genérica recebida, enviando dica');
                     await sock.sendMessage(
                         senderJid,
-                        { text: '👋 Olá! Envie uma imagem para que eu a converta em figurinha.\n' +
+                        { text: ' Olá! Envie uma imagem para que eu a converta em figurinha.\n' +
                                'Digite *ajuda* para ver os comandos disponíveis.' }
                     );
                     continue;

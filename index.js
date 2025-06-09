@@ -7,6 +7,13 @@ const sharp = require('sharp');
 const qrcode = require('qrcode-terminal');
 // Importando o módulo crypto explicitamente
 const crypto = require('crypto');
+// Módulos para processamento de vídeo
+const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+const ffmpeg = require('fluent-ffmpeg');
+const GIFEncoder = require('gif-encoder-2');
+
+// Configurando o caminho do ffmpeg
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 // Configuração de logs
 const logger = pino({ 
@@ -187,6 +194,134 @@ async function startBot() {
             }
         });
         
+        // Função para criar GIF a partir de vídeo
+        async function createVideoGif(videoPath, senderJid) {
+            try {
+                console.log(`Iniciando criação de GIF a partir de: ${videoPath}`);
+                
+                // Verificar se o arquivo existe
+                if (!fs.existsSync(videoPath)) {
+                    console.error(`Arquivo de vídeo não encontrado: ${videoPath}`);
+                    throw new Error('Arquivo de vídeo não encontrado');
+                }
+                
+                // Verificar a extensão do arquivo
+                const fileExt = path.extname(videoPath).toLowerCase();
+                console.log(`Extensão do arquivo de vídeo: ${fileExt}`);
+                
+                // Caminho para salvar o GIF temporário
+                const gifPath = path.join(tempDir, `gif_${Date.now()}_${Math.floor(Math.random() * 10000)}.gif`);
+                // Caminho para salvar a figurinha
+                const outputPath = path.join(tempDir, `sticker_${Date.now()}_${Math.floor(Math.random() * 10000)}.webp`);
+                
+                console.log(`Caminho de saída do GIF: ${gifPath}`);
+                console.log(`Caminho de saída da figurinha: ${outputPath}`);
+                
+                // Converter vídeo para GIF usando ffmpeg
+                console.log('Iniciando conversão de vídeo para GIF...');
+                console.log(`Usando ffmpeg em: ${ffmpegInstaller.path}`);
+                
+                await new Promise((resolve, reject) => {
+                    // Configuração do ffmpeg com mais opções para melhor compatibilidade
+                    const command = ffmpeg(videoPath)
+                        .outputOptions([
+                            '-t', '3',          // Limita para 3 segundos (WhatsApp tem limite de tamanho)
+                            '-vf', 'fps=12,scale=256:-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer',
+                            '-loop', '0'
+                        ])
+                        .output(gifPath);
+                    
+                    // Adiciona listeners para eventos
+                    command.on('start', (commandLine) => {
+                        console.log('Comando ffmpeg iniciado:', commandLine);
+                    });
+                    
+                    command.on('progress', (progress) => {
+                        console.log(`Progresso da conversão: ${JSON.stringify(progress)}`);
+                    });
+                    
+                    command.on('end', () => {
+                        console.log('Conversão para GIF concluída');
+                        resolve();
+                    });
+                    
+                    command.on('error', (err) => {
+                        console.error('Erro na conversão do vídeo para GIF:', err);
+                        reject(new Error(`Erro na conversão do vídeo: ${err.message}`));
+                    });
+                    
+                    // Executa o comando
+                    command.run();
+                });
+                
+                // Verificar se o GIF foi criado
+                if (!fs.existsSync(gifPath)) {
+                    throw new Error('Falha ao criar GIF a partir do vídeo');
+                }
+                
+                console.log('GIF criado com sucesso, convertendo para WebP...');
+                
+                // Converter GIF para WebP (formato de figurinha)
+                await sharp(gifPath, { animated: true })
+                    .resize(512, 512, {
+                        fit: 'contain',
+                        background: { r: 0, g: 0, b: 0, alpha: 0 }
+                    })
+                    .toFormat('webp', { quality: 80 })
+                    .toFile(outputPath);
+                
+                // Verificar se o arquivo de saída existe
+                if (!fs.existsSync(outputPath)) {
+                    console.error(`Arquivo de saída não foi criado: ${outputPath}`);
+                    throw new Error('Falha ao criar figurinha animada');
+                }
+                
+                // Ler o arquivo de figurinha
+                const stickerBuffer = fs.readFileSync(outputPath);
+                console.log(`Figurinha animada lida como buffer, tamanho: ${stickerBuffer.length} bytes`);
+                
+                // Enviar a figurinha
+                console.log('Enviando figurinha animada...');
+                try {
+                    await sock.sendMessage(
+                        senderJid, 
+                        { sticker: stickerBuffer }
+                    );
+                    console.log('Figurinha animada enviada com sucesso!');
+                } catch (sendError) {
+                    console.error('Erro ao enviar figurinha animada:', sendError);
+                    throw new Error(`Erro ao enviar figurinha animada: ${sendError.message}`);
+                }
+                
+                // Limpar arquivos temporários
+                try {
+                    fs.unlinkSync(videoPath);
+                    fs.unlinkSync(gifPath);
+                    fs.unlinkSync(outputPath);
+                    console.log('Arquivos temporários limpos');
+                } catch (err) {
+                    console.error('Erro ao limpar arquivos temporários:', err);
+                    // Não lançar erro aqui, pois a figurinha já foi enviada
+                }
+                
+                return true;
+            } catch (error) {
+                console.error('Erro ao criar figurinha animada:', error);
+                
+                // Tentar enviar mensagem de erro
+                try {
+                    await sock.sendMessage(
+                        senderJid,
+                        { text: '❌ Erro ao criar figurinha animada. Detalhes do erro: ' + error.message }
+                    );
+                } catch (sendError) {
+                    console.error('Erro ao enviar mensagem de erro:', sendError);
+                }
+                
+                return false;
+            }
+        }
+        
         // Função para criar figurinha a partir de uma imagem
         async function createSticker(imagePath, senderJid) {
             try {
@@ -274,6 +409,117 @@ async function startBot() {
             }
         }
 
+        // Função para processar vídeos
+        async function processVideos(messages, senderJid) {
+            try {
+                // Responde ao usuário informando quantos vídeos foram recebidos
+                await sock.sendMessage(
+                    senderJid,
+                    { text: `⏳ Criando ${messages.length} figurinha(s) animada(s)...` }
+                );
+                
+                // Processa cada vídeo em paralelo
+                const processingPromises = messages.map(async (message) => {
+                    try {
+                        // Baixa o vídeo
+                        console.log('Baixando vídeo...');
+                        let buffer;
+                        
+                        try {
+                            buffer = await downloadMediaMessage(
+                                message,
+                                'buffer',
+                                {},
+                                { 
+                                    logger: pino({ level: 'silent' }),
+                                    // Adiciona timeout para evitar que o download fique preso
+                                    timeout: 30000 // Vídeos podem ser maiores, então aumentamos o timeout
+                                }
+                            );
+                        } catch (downloadError) {
+                            console.error('Erro durante o download do vídeo:', downloadError);
+                            throw new Error(`Falha ao baixar vídeo: ${downloadError.message}`);
+                        }
+                        
+                        if (!buffer || buffer.length === 0) {
+                            throw new Error('Vídeo vazio ou inválido');
+                        }
+                        
+                        console.log(`Vídeo baixado, tamanho: ${buffer.length} bytes`);
+                        
+                        // Determina o tipo de arquivo com base no mimetype
+                        let fileExt = '.mp4'; // Padrão para vídeos
+                        if (message.message && message.message.videoMessage && message.message.videoMessage.mimetype) {
+                            const mimetype = message.message.videoMessage.mimetype;
+                            console.log(`Mimetype do vídeo: ${mimetype}`);
+                            
+                            if (mimetype.includes('mp4')) {
+                                fileExt = '.mp4';
+                            } else if (mimetype.includes('3gp')) {
+                                fileExt = '.3gp';
+                            } else if (mimetype.includes('mkv')) {
+                                fileExt = '.mkv';
+                            } else if (mimetype.includes('avi')) {
+                                fileExt = '.avi';
+                            } else if (mimetype.includes('mov')) {
+                                fileExt = '.mov';
+                            }
+                        }
+                        
+                        // Salva o vídeo temporariamente com a extensão correta
+                        const videoPath = path.join(tempDir, `video_${Date.now()}_${Math.floor(Math.random() * 10000)}${fileExt}`);
+                        try {
+                            fs.writeFileSync(videoPath, buffer);
+                            console.log(`Vídeo salvo em: ${videoPath} com extensão ${fileExt}`);
+                        } catch (writeError) {
+                            console.error('Erro ao salvar vídeo:', writeError);
+                            throw new Error(`Erro ao salvar vídeo: ${writeError.message}`);
+                        }
+                        
+                        // Cria e envia a figurinha animada
+                        return await createVideoGif(videoPath, senderJid);
+                    } catch (error) {
+                        console.error('Erro ao processar vídeo:', error);
+                        return false;
+                    }
+                });
+                
+                // Aguarda todos os vídeos serem processados
+                const results = await Promise.all(processingPromises);
+                
+                // Conta quantas figurinhas foram criadas com sucesso
+                const successCount = results.filter(result => result === true).length;
+                const failCount = results.length - successCount;
+                
+                // Envia mensagem de resumo
+                if (failCount > 0) {
+                    await sock.sendMessage(
+                        senderJid,
+                        { text: `✅ ${successCount} figurinha(s) animada(s) criada(s) com sucesso.\n❌ ${failCount} falha(s).` }
+                    );
+                } else if (successCount > 1) {
+                    await sock.sendMessage(
+                        senderJid,
+                        { text: `✅ Todas as ${successCount} figurinhas animadas foram criadas com sucesso!` }
+                    );
+                }
+                
+                console.log(`Processamento de ${messages.length} vídeos concluído. Sucesso: ${successCount}, Falhas: ${failCount}`);
+            } catch (error) {
+                console.error('Erro ao processar vídeos:', error);
+                
+                // Tentar enviar mensagem de erro
+                try {
+                    await sock.sendMessage(
+                        senderJid,
+                        { text: '❌ Erro ao processar vídeos. Detalhes: ' + error.message }
+                    );
+                } catch (sendError) {
+                    console.error('Erro ao enviar mensagem de erro:', sendError);
+                }
+            }
+        }
+        
         // Função para processar imagens em paralelo
         async function processImages(messages, senderJid) {
             try {
@@ -458,6 +704,17 @@ async function startBot() {
                     continue;
                 }
                 
+                // Processar vídeos para conversão em GIF
+                if (messageType === 'videoMessage') {
+                    console.log('Mensagem de vídeo recebida, processando para GIF...');
+                    const videosToProcess = [];
+                    videosToProcess.push(message);
+                    
+                    // Processa o vídeo para criar GIF
+                    await processVideos(videosToProcess, senderJid);
+                    continue;
+                }
+                
                 // Verifica se é uma mensagem de texto
                 if (messageType === 'conversation' || messageType === 'extendedTextMessage') {
                     const text = messageType === 'conversation' 
@@ -484,6 +741,7 @@ async function startBot() {
                             { text: '🤖 *Bot de Figurinhas*\n\n' +
                                    '- Envie uma imagem para convertê-la em figurinha\n' +
                                    '- Envie várias imagens e todas serão convertidas\n' +
+                                   '- Envie um vídeo para convertê-lo em figurinha animada (GIF)\n' +
                                    '- Digite *ping* para verificar se estou online\n' +
                                    '- Digite *ajuda* para ver esta mensagem' }
                         );
@@ -494,7 +752,7 @@ async function startBot() {
                     console.log('Mensagem de texto genérica recebida, enviando dica');
                     await sock.sendMessage(
                         senderJid,
-                        { text: '👋 Olá! Envie uma imagem para que eu a converta em figurinha.\n' +
+                        { text: '👋 Olá! Envie uma imagem para que eu a converta em figurinha ou um vídeo para criar uma figurinha animada.\n' +
                                'Digite *ajuda* para ver os comandos disponíveis.' }
                     );
                     continue;
@@ -515,6 +773,20 @@ async function startBot() {
                         
                         // Processa a imagem
                         await processImages([imageMessage], senderJid);
+                        continue;
+                    }
+                    
+                    // Verifica se é um vídeo para processar
+                    if (viewOnceContent.message && viewOnceContent.message.videoMessage) {
+                        console.log('Vídeo em mensagem viewOnce detectado');
+                        // Coleta o vídeo para processamento
+                        const videoMessage = {...message};
+                        videoMessage.message = {
+                            videoMessage: viewOnceContent.message.videoMessage
+                        };
+                        
+                        // Processa o vídeo
+                        await processVideos([videoMessage], senderJid);
                         continue;
                     }
                 }

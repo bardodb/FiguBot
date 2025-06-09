@@ -49,7 +49,7 @@ async function startBot() {
         console.log('Estado de autenticação carregado');
         
         // Inicializa a conexão com configurações adicionais
-        const sock = makeWASocket({
+        let sock = makeWASocket({
             version,
             auth: state,
             printQRInTerminal: true,
@@ -59,7 +59,27 @@ async function startBot() {
             defaultQueryTimeoutMs: 60000,
             keepAliveIntervalMs: 10000,
             emitOwnEvents: false,
-            retryRequestDelayMs: 250
+            retryRequestDelayMs: 250,
+            markOnlineOnConnect: false,
+            syncFullHistory: false,
+            patchMessageBeforeSending: (message) => {
+                // Reduz o tamanho das mensagens para evitar erros de stream
+                const requiresPatch = !!(message.buttonsMessage || message.listMessage || message.templateMessage);
+                if (requiresPatch) {
+                    message = {
+                        viewOnceMessage: {
+                            message: {
+                                messageContextInfo: {
+                                    deviceListMetadataVersion: 2,
+                                    deviceListMetadata: {},
+                                },
+                                ...message,
+                            }
+                        }
+                    };
+                }
+                return message;
+            }
         });
         
         console.log('Socket WhatsApp inicializado');
@@ -113,23 +133,50 @@ async function startBot() {
             }
             
             if (connection === 'close') {
+                // Verifica o código de status para tratamento específico
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
                 const shouldReconnect = (lastDisconnect?.error instanceof Boom)
-                    ? lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut
+                    ? statusCode !== DisconnectReason.loggedOut
                     : true;
                 
-                console.log('Conexão fechada devido a ', lastDisconnect?.error);
+                console.log(`Conexão fechada. Código de status: ${statusCode}`);
+                console.log('Detalhes do erro:', lastDisconnect?.error);
+                
+                // Tratamento específico para erro de stream (código 515)
+                if (statusCode === 515) {
+                    console.log('Erro de stream detectado. Aguardando 10 segundos antes de reconectar...');
+                    // Limpa recursos antes de reconectar
+                    try {
+                        sock.ev.removeAllListeners();
+                        sock = null;
+                    } catch (e) {}
+                    
+                    setTimeout(() => {
+                        console.log('Tentando reconectar após erro de stream...');
+                        startBot();
+                    }, 10000);
+                    return;
+                }
                 
                 if (shouldReconnect) {
-                    console.log('Reconectando após 5 segundos...');
+                    const reconnectDelay = statusCode === DisconnectReason.restartRequired ? 10000 : 5000;
+                    console.log(`Reconectando após ${reconnectDelay/1000} segundos...`);
+                    
+                    // Limpa recursos antes de reconectar
+                    try {
+                        sock.ev.removeAllListeners();
+                        sock = null;
+                    } catch (e) {}
+                    
                     setTimeout(() => {
                         console.log('Tentando reconectar...');
                         startBot();
-                    }, 5000);
+                    }, reconnectDelay);
                 } else {
                     console.log('Desconectado permanentemente.');
                     
                     // Se foi desconectado por logout, remova os arquivos de autenticação
-                    if (lastDisconnect?.error?.output?.statusCode === DisconnectReason.loggedOut) {
+                    if (statusCode === DisconnectReason.loggedOut) {
                         console.log('Removendo arquivos de autenticação...');
                         fs.rmSync(authFolder, { recursive: true, force: true });
                         fs.mkdirSync(authFolder, { recursive: true });
@@ -483,12 +530,37 @@ async function startBot() {
                 continue;
             }
         });
+        // Adiciona listener para erros específicos
+        sock.ev.on('messaging-history.set', (data) => {
+            console.log(`Histórico de mensagens atualizado: ${data.length} mensagens carregadas`);
+        });
+        
+        // Adiciona listener para erros específicos
+        process.on('uncaughtException', (err) => {
+            console.error('Erro não tratado:', err);
+            // Não reinicia automaticamente para evitar loops infinitos
+        });
+        
+        // Gerencia erros de websocket
+        sock.ws.on('error', (err) => {
+            console.error('Erro de WebSocket:', err);
+            // O evento connection.update já vai lidar com a reconexão
+        });
+        
+        // Gerencia fechamento de websocket
+        sock.ws.on('close', (code) => {
+            console.log(`WebSocket fechado com código ${code}`);
+            // O evento connection.update já vai lidar com a reconexão
+        });
+        
     } catch (error) {
         console.error('Erro ao iniciar o bot:', error);
+        // Evita loops infinitos de reconexão verificando o tipo de erro
+        const reconnectDelay = error.message?.includes('Stream') ? 15000 : 10000;
         setTimeout(() => {
-            console.log('Tentando reiniciar o bot após erro...');
+            console.log(`Tentando reiniciar o bot após erro... (aguardando ${reconnectDelay/1000}s)`);            
             startBot();
-        }, 10000);
+        }, reconnectDelay);
     }
 }
 
